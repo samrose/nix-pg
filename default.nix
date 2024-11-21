@@ -1,48 +1,27 @@
 { pkgs ? import <nixpkgs> {} }:
 
 let
-  queryDbPure = query:
-    let
-      queryHash = builtins.hashString "sha256" query;
-      # Force unique hash by including timestamp in derivation name
-      result = pkgs.runCommand "db-query-${queryHash}-${builtins.toString pkgs.stdenv.hostPlatform.system}" {} ''
-        ${pkgs.postgresql}/bin/psql \
-            "postgresql://postgres:postgres@localhost:5435/postgres" \
-          -t \
-          -A \
-          -c "${query}" > $out
-      '';
-      value = builtins.fromJSON (builtins.readFile result);
-    in {
-      value = builtins.trace "DB Result: ${builtins.toJSON value}" value;
-    };
+  packageData = import (pkgs.runCommand "package-data.nix" {} ''
+    ${pkgs.postgresql}/bin/psql \
+      "postgresql://postgres:postgres@localhost:5435/postgres" \
+      -t -A \
+      -c "SELECT '{ name = \"' || name || '\"' || 
+         '; version = \"' || version || '\"' ||
+         '; buildPhase = \"' || build_phase || '\"' ||
+         '; installPhase = \"' || install_phase || '\"' ||
+         '; unpackPhase = \"' || unpack_phase || '\"' ||
+         '; url = \"' || source_url || '\"' ||
+         '; sha256 = \"' || btrim(source_hash, 'sha256-') || '\"' ||
+         '; }' FROM packages WHERE name = 'hello-world'" > $out
+  '');
 
-  mkPackageFromDb = name:
-    let
-      query = ''
-        SELECT json_agg(json_build_object(
-          'name', name,
-          'version', version,
-          'buildPhase', build_phase,
-          'installPhase', install_phase,
-          'source_url', source_url,
-          'source_hash', source_hash,
-          'unpackPhase', unpack_phase
-        ))
-        FROM packages 
-        WHERE name = '${name}'
-      '';
-      info = queryDbPure query;
-      packageInfo = builtins.head info.value;
-      hash = builtins.replaceStrings ["sha256-"] [""] packageInfo.source_hash;
-    in
+  mkPackage = data:
     pkgs.stdenv.mkDerivation {
-      inherit (packageInfo) name version buildPhase installPhase unpackPhase;
+      inherit (data) name version buildPhase installPhase unpackPhase;
       src = pkgs.fetchurl {
-        url = packageInfo.source_url;
-        sha256 = hash;
+        inherit (data) url sha256;
       };
     };
 in {
-  example = mkPackageFromDb "hello-world";
+  example = mkPackage packageData;
 }
