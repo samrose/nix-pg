@@ -1,7 +1,9 @@
 { pkgs ? import <nixpkgs> {} }:
 
 let
-  packageData = import (pkgs.runCommand "package-data.nix" {} ''
+  # Force re-evaluation by adding a timestamp to the derivation name
+  packageData = import (pkgs.runCommand "package-data-${builtins.toString __currentTime}.nix" {
+  } ''
     ${pkgs.postgresql}/bin/psql \
       "postgresql://postgres:postgres@localhost:5435/postgres" \
       -t -A \
